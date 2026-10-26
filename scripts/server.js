@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { prepareAssets, PROJECT_DIR } from './prepare-assets.js';
 
 const MIME_TYPES = {
@@ -132,7 +132,11 @@ export async function startServer() {
   return server;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+const isDirectRun =
+  Boolean(process.argv[1]) &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
   startServer().catch(error => {
     console.error(error.code === 'EADDRINUSE'
       ? `Port ${process.env.PORT || '5188'} is already in use. Stop the other server or set PORT to a different number.`

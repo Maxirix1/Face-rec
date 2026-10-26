@@ -1,13 +1,9 @@
-import { motion } from 'framer-motion';
-import { Database, Shield, Beaker } from 'lucide-react';
-import ParallaxScene from './components/ParallaxScene.jsx';
-import Header from './components/Header.jsx';
-import Hero from './components/Hero.jsx';
 import Notice from './components/Notice.jsx';
 import LabStage from './components/LabStage.jsx';
 import RegisterPanel from './components/RegisterPanel.jsx';
 import ProfilesList from './components/ProfilesList.jsx';
 import ResultsBar from './components/ResultsBar.jsx';
+import Header from './components/Header.jsx';
 import { useFaceRegistry } from './hooks/useFaceRegistry.js';
 
 export default function App() {
@@ -15,13 +11,11 @@ export default function App() {
 
   return (
     <>
-      <ParallaxScene />
       <Header engineStatus={face.engineStatus} modelsReady={face.modelsReady} />
       <main>
-        <Hero />
         <Notice notice={face.notice} onDismiss={face.clearNotice} />
 
-        <div id="workspace" className="workspace workspace-camera-first">
+        <div id="workspace" className="workspace">
           <LabStage
             videoRef={face.videoRef}
             canvasRef={face.canvasRef}
@@ -76,23 +70,6 @@ export default function App() {
           threshold={face.threshold}
           onThresholdChange={face.updateThreshold}
         />
-
-        <motion.footer
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5 }}
-        >
-          <p>
-            <Database size={12} aria-hidden="true" />
-            Lab เก็บเฉพาะเวกเตอร์ใบหน้า · ไม่บันทึกภาพถ่ายหรือวิดีโอ
-          </p>
-          <span>
-            <Beaker size={11} aria-hidden="true" />
-            Test bench · ยังไม่มีระบบตรวจจับการปลอมด้วยภาพถ่าย
-            <Shield size={11} aria-hidden="true" />
-          </span>
-        </motion.footer>
       </main>
     </>
   );
