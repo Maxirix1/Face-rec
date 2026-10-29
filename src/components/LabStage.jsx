@@ -1,7 +1,8 @@
 import { useRef } from 'react';
+import { motion } from 'framer-motion';
 import {
   Video, VideoOff, Users, Scan, Timer, Aperture,
-  Upload, ImagePlus, Trash2,
+  Upload, ImagePlus, Trash2, FlaskConical, Activity,
 } from 'lucide-react';
 
 export default function LabStage({
@@ -33,7 +34,32 @@ export default function LabStage({
   const empty = !showVideo && !showImage;
 
   return (
-    <section className="lab-stage-card" aria-labelledby="lab-heading">
+    <motion.section
+      className="lab-stage-card"
+      aria-labelledby="lab-heading"
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-40px' }}
+      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <div className="lab-rail">
+        <div className="lab-rail-left">
+          <FlaskConical size={14} aria-hidden="true" />
+          <span className="section-kicker">SCAN BENCH · CH-01</span>
+        </div>
+        <span className={`pill ${cameraOn || sourceMode === 'upload' ? 'active' : ''}`}>
+          <Activity size={12} aria-hidden="true" />
+          {sourceMode === 'upload' ? 'IMAGE SCAN' : cameraState}
+        </span>
+      </div>
+
+      <div className="card-header dark">
+        <div>
+          <h2 id="lab-heading">โต๊ะทดสอบการจดจำ</h2>
+          <p className="lab-sub">เปิดกล้องแบบสด หรืออัปโหลดรูปใบหน้าเพื่อสแกน</p>
+        </div>
+      </div>
+
       <div className="lab-tabs" role="tablist" aria-label="โหมดสแกน">
         <button
           type="button"
@@ -43,7 +69,7 @@ export default function LabStage({
           onClick={() => onModeChange('camera')}
         >
           <Aperture size={15} aria-hidden="true" />
-          Camera
+          Live Camera
         </button>
         <button
           type="button"
@@ -53,7 +79,7 @@ export default function LabStage({
           onClick={() => onModeChange('upload')}
         >
           <Upload size={15} aria-hidden="true" />
-          Upload
+          Upload Scan
         </button>
       </div>
 
@@ -72,27 +98,33 @@ export default function LabStage({
         <img
           ref={imageRef}
           className={showImage ? 'is-visible' : 'is-hidden'}
-          alt={uploadName ? `รูป: ${uploadName}` : ''}
+          alt={uploadName ? `รูปทดสอบ: ${uploadName}` : ''}
         />
         <canvas ref={canvasRef} aria-hidden="true" />
 
         {empty && (
           <div className="camera-empty">
-            <h3 id="lab-heading">Ready</h3>
+            <div className="face-guide" aria-hidden="true">
+              <Scan size={36} strokeWidth={1.4} />
+            </div>
+            <h3>Lab idle</h3>
             <p>
               {sourceMode === 'upload'
-                ? 'อัปโหลดรูปเพื่อสแกน'
-                : 'เปิดกล้องเพื่อเริ่ม'}
+                ? 'อัปโหลดรูปใบหน้าเพื่อรันการสแกนทดสอบ'
+                : 'เปิดกล้อง หรือสลับไปโหมดอัปโหลดรูป'}
             </p>
+            <span className="camera-hint">TEST PROTOCOL · LOCAL ONLY · NO CLOUD</span>
           </div>
         )}
 
+        <div className="view-corner top-left" />
+        <div className="view-corner bottom-right" />
         {(cameraOn || sourceMode === 'upload') && (
           <span className="live-label">
-            <i /> {sourceMode === 'upload' ? 'Image' : cameraState}
+            <i /> {sourceMode === 'upload' ? 'STATIC · SCAN' : 'LIVE · LOCAL'}
           </span>
         )}
-        {scanning && <div className="lab-scanning" aria-live="polite">Scanning</div>}
+        {scanning && <div className="lab-scanning" aria-live="polite">SCANNING…</div>}
       </div>
 
       <div className="camera-toolbar">
@@ -100,24 +132,29 @@ export default function LabStage({
           <p role="status">{scanSummary}</p>
           <small>{engineStatus}</small>
           {uploadName && sourceMode === 'upload' && (
-            <small className="upload-meta">{uploadName}</small>
+            <small className="upload-meta">FILE · {uploadName}</small>
           )}
         </div>
 
         {sourceMode === 'upload' ? (
           <div className="camera-actions">
-            <button className="button button-ghost" type="button" disabled={!uploadName} onClick={onClearUpload}>
-              <Trash2 size={16} aria-hidden="true" />
-              Clear
+            <button
+              className="button button-outline"
+              type="button"
+              disabled={!uploadName}
+              onClick={onClearUpload}
+            >
+              <Trash2 size={17} aria-hidden="true" />
+              ล้างรูป
             </button>
             <button
-              className="button button-solid"
+              className="button button-lime"
               type="button"
               disabled={!modelsReady || scanning}
               onClick={() => fileRef.current?.click()}
             >
-              <ImagePlus size={16} aria-hidden="true" />
-              {scanning ? 'Scanning…' : uploadName ? 'Change' : 'Upload'}
+              <ImagePlus size={17} aria-hidden="true" />
+              {scanning ? 'กำลังสแกน…' : uploadName ? 'เปลี่ยนรูป' : 'อัปโหลดรูป'}
             </button>
             <input
               ref={fileRef}
@@ -133,13 +170,23 @@ export default function LabStage({
           </div>
         ) : (
           <div className="camera-actions">
-            <button className="button button-ghost" type="button" disabled={!starting && !cameraOn} onClick={onStop}>
-              <VideoOff size={16} aria-hidden="true" />
-              Stop
+            <button
+              className="button button-outline"
+              type="button"
+              disabled={!starting && !cameraOn}
+              onClick={onStop}
+            >
+              <VideoOff size={17} aria-hidden="true" />
+              ปิดกล้อง
             </button>
-            <button className="button button-solid" type="button" disabled={starting || cameraOn} onClick={onStart}>
-              <Video size={16} aria-hidden="true" />
-              {starting ? 'Starting…' : 'Start'}
+            <button
+              className="button button-lime"
+              type="button"
+              disabled={starting || cameraOn}
+              onClick={onStart}
+            >
+              <Video size={17} aria-hidden="true" />
+              {starting ? 'กำลังเปิด…' : 'เปิดกล้อง'}
             </button>
           </div>
         )}
@@ -147,18 +194,18 @@ export default function LabStage({
 
       <div className="metrics">
         <div>
-          <span><Users size={12} aria-hidden="true" /> People</span>
-          <strong>{metricPeople}</strong>
+          <span><Users size={12} aria-hidden="true" /> enrolled</span>
+          <strong>{String(metricPeople).padStart(2, '0')}</strong>
         </div>
         <div>
-          <span><Scan size={12} aria-hidden="true" /> Faces</span>
+          <span><Scan size={12} aria-hidden="true" /> faces</span>
           <strong>{metricFaces}</strong>
         </div>
         <div>
-          <span><Timer size={12} aria-hidden="true" /> ms</span>
-          <strong>{metricLatency}</strong>
+          <span><Timer size={12} aria-hidden="true" /> latency</span>
+          <strong>{metricLatency} <small>ms</small></strong>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 }
