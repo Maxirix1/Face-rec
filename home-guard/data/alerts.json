@@ -1,0 +1,38 @@
+[
+  {
+    "id": "ac080a45-17c7-4dc8-9753-f022b26d05dc",
+    "createdAt": "2026-10-29T05:13:31.806Z",
+    "type": "unknown",
+    "label": "ทดสอบ",
+    "message": "ทดสอบแจ้งเตือนจากแอป Face",
+    "streamPath": "cam1",
+    "snapshotUrl": null
+  },
+  {
+    "id": "04b04c36-a356-4375-82b1-5286acceb730",
+    "createdAt": "2026-10-29T04:49:20.716Z",
+    "type": "unknown",
+    "label": "ทดสอบ",
+    "message": "ทดสอบแจ้งเตือนจากแอป Face",
+    "streamPath": "cam1",
+    "snapshotUrl": null
+  },
+  {
+    "id": "8e9eb9b6-5040-4ce8-9f7a-7f753289db8d",
+    "createdAt": "2026-10-29T04:30:33.762Z",
+    "type": "unknown",
+    "label": "ทดสอบ",
+    "message": "ทดสอบแจ้งเตือนจากแอป Face",
+    "streamPath": "cam1",
+    "snapshotUrl": null
+  },
+  {
+    "id": "82c37056-ffbd-49b6-ab2b-79cc9f0fafba",
+    "createdAt": "2026-10-28T15:05:31.415Z",
+    "type": "unknown",
+    "label": "คนแปลกหน้า",
+    "message": "ทดสอบแจ้งเตือนจาก VPS",
+    "streamPath": "cam1",
+    "snapshotUrl": null
+  }
+]

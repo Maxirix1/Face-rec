@@ -1,0 +1,16 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.12.2
+    container_name: home-guard-mediamtx
+    restart: unless-stopped
+    ports:
+      # RTSP publish from Pi (ffmpeg)
+      - "127.0.0.1:8554:8554"
+      # WebRTC / WHEP for browser
+      - "127.0.0.1:8889:8889"
+      # HLS optional
+      - "127.0.0.1:8888:8888"
+      # API
+      - "127.0.0.1:9997:9997"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
