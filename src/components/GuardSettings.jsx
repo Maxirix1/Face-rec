@@ -8,15 +8,55 @@ export default function GuardSettings({
   lastGuardAlertAt,
 }) {
   const ready = Boolean(guardConfig.guardUrl && guardConfig.piToken);
+  const isRtsp = guardConfig.videoSource !== 'browser';
 
   return (
     <section className="add-people">
       <div className="step-card">
+        <p className="step-kicker">กล้อง · RTSP</p>
+        <h2>แหล่งวิดีโอเฝ้าบ้าน</h2>
+        <p className="step-lead">
+          โหมดเฝ้าบ้านใช้กล้องจาก Ubuntu server ผ่าน RTSP → MediaMTX → WebRTC (WHEP)
+          ไม่ใช้กล้องของเบราว์เซอร์ (มือถือ/โน้ต) เป็นค่าเริ่มต้น
+        </p>
+
+        <label htmlFor="video-source">แหล่งกล้อง</label>
+        <select
+          id="video-source"
+          value={isRtsp ? 'rtsp' : 'browser'}
+          onChange={(e) => onChange({ videoSource: e.target.value })}
+        >
+          <option value="rtsp">RTSP / MediaMTX (แนะนำ · Ubuntu + กล้อง)</option>
+          <option value="browser">กล้องเบราว์เซอร์ (ทดสอบเท่านั้น)</option>
+        </select>
+
+        <label htmlFor="stream-path">Stream path (MediaMTX)</label>
+        <input
+          id="stream-path"
+          type="text"
+          value={guardConfig.streamPath}
+          onChange={(e) => onChange({ streamPath: e.target.value })}
+        />
+
+        <label htmlFor="whep-url">WHEP URL (ว่าง = ใช้ /webrtc/… ของเครื่องนี้)</label>
+        <input
+          id="whep-url"
+          type="url"
+          value={guardConfig.whepUrl}
+          placeholder="http://127.0.0.1:8889/cam1/whep"
+          onChange={(e) => onChange({ whepUrl: e.target.value })}
+        />
+        <p className="helper">
+          ว่างไว้ถ้า face กับ MediaMTX อยู่เครื่องเดียวกัน (proxy ในตัว)
+          หรือใส่ URL ของ MediaMTX / guard.effecttier.com โดยตรง
+        </p>
+      </div>
+
+      <div className="step-card">
         <p className="step-kicker">Pi ↔ VPS</p>
         <h2>ตั้งค่า Home Guard</h2>
         <p className="step-lead">
-          เครื่องนี้ (VPS) ไม่ได้ค้นหา Pi เอง — Pi เป็นฝ่ายยิง HTTP มาหา Guard URL
-          รายชื่อใบหน้าต้องซิงก์ผ่าน VPS ให้ Pi กับมือถือใช้ชุดเดียวกัน
+          แจ้งเตือนคนแปลกหน้าไป VPS · ครอบครัวเปิด guard.effecttier.com ดูภาพจาก RTSP ชุดเดียวกัน
         </p>
 
         <label className="consent">
@@ -57,14 +97,6 @@ export default function GuardSettings({
           onChange={(e) => onChange({ alertCooldownSec: Number(e.target.value) || 45 })}
         />
 
-        <label htmlFor="stream-path">Stream path</label>
-        <input
-          id="stream-path"
-          type="text"
-          value={guardConfig.streamPath}
-          onChange={(e) => onChange({ streamPath: e.target.value })}
-        />
-
         <button
           type="button"
           className="button button-solid full"
@@ -93,14 +125,17 @@ export default function GuardSettings({
       </div>
 
       <div className="step-card">
-        <h2>Pi ต่อกับเครื่องนี้อย่างไร</h2>
+        <h2>Ubuntu local + RTSP</h2>
         <p className="step-lead">
-          1) คัดลอก face ไป Pi แล้วรัน `HOST=0.0.0.0 PORT=5188 npm start`<br />
-          2) บน Pi เปิดแท็บตั้งค่า → Guard URL = `https://guard.effecttier.com` + Pi Token<br />
-          3) บนเครื่องนี้ (หรือมือถือ) ลงทะเบียนครอบครัว → กด “ซิงก์ขึ้น VPS”<br />
-          4) บน Pi กด “ดึงจาก VPS” ให้ได้รายชื่อชุดเดียว<br />
-          5) เปิดโหมดเฝ้าบ้านบน Pi — เจอคนแปลกหน้า Pi จะ POST ไป VPS เอง<br />
-          6) (มีกล้องแล้ว) ffmpeg ดัน RTSP ไป MediaMTX บน VPS
+          1) รัน MediaMTX บน Ubuntu (หรือใช้ชุด home-guard)<br />
+          2) ดันกล้องเข้า path `cam1` เช่น<br />
+          <code style={{ display: 'block', margin: '0.5rem 0', wordBreak: 'break-all' }}>
+            ffmpeg -rtsp_transport tcp -i rtsp://USER:PASS@CAM_IP/stream -c copy -f rtsp rtsp://127.0.0.1:8554/cam1
+          </code>
+          หรือตั้ง MediaMTX ให้ pull RTSP ตรงๆ<br />
+          3) รัน face: <code>HOST=0.0.0.0 PORT=5188 npm start</code><br />
+          4) แท็บเฝ้าบ้าน → เห็นภาพจาก RTSP แล้วสแกนใบหน้า<br />
+          5) ครอบครัวดูสตรีมชุดเดียวกันที่ guard.effecttier.com
         </p>
       </div>
     </section>

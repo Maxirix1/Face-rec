@@ -21,13 +21,13 @@ export default function ScanCamera({
   return (
     <section className="scan-camera">
       <div className="step-card scan-intro">
-        <p className="step-kicker">{watchMode ? 'โหมดเฝ้าบ้าน' : 'ขั้นตอนที่ 2'}</p>
-        <h2>{watchMode ? 'ตรวจคนแปลกหน้า' : 'สแกนด้วยกล้อง'}</h2>
+        <p className="step-kicker">{watchMode ? 'โหมดเฝ้าบ้าน · RTSP' : 'ขั้นตอนที่ 2'}</p>
+        <h2>{watchMode ? 'ตรวจคนแปลกหน้าจากกล้อง RTSP' : 'สแกนด้วยกล้อง'}</h2>
         <p className="step-lead">
           {!profileCount
             ? 'ยังไม่มีคนในครอบครัว · เพิ่มคนด้วยการอัปโหลดรูปก่อน'
             : watchMode
-              ? `มี ${profileCount} คนในบ้าน · เจอคนที่ไม่ใช่ครอบครัวจะแจ้งเตือนไป VPS`
+              ? `มี ${profileCount} คนในบ้าน · ภาพมาจาก RTSP/MediaMTX · เจอคนแปลกหน้าจะแจ้ง VPS`
               : `มี ${profileCount} คนในระบบ · เมื่อเจอใบหน้าที่ตรงกันจะขึ้น Success`}
         </p>
         {!profileCount && (
@@ -57,8 +57,8 @@ export default function ScanCamera({
 
           {!cameraOn && (
             <div className="camera-empty">
-              <h3>{starting ? 'กำลังเปิดกล้อง…' : 'กล้องยังไม่เปิด'}</h3>
-              <p>กดปุ่มด้านล่างเพื่อเริ่มเฝ้าบ้าน</p>
+              <h3>{starting ? 'กำลังเชื่อมสตรีม RTSP…' : 'ยังไม่เชื่อมกล้อง RTSP'}</h3>
+              <p>กดปุ่มด้านล่างเพื่อดูภาพจาก MediaMTX แล้วเริ่มสแกน</p>
             </div>
           )}
 
@@ -84,11 +84,11 @@ export default function ScanCamera({
         </div>
 
         <div className="camera-toolbar">
-          <p role="status">{cameraOn ? scanSummary : 'พร้อมสแกนเมื่อเปิดกล้อง'}</p>
+          <p role="status">{cameraOn ? scanSummary : 'พร้อมเมื่อสตรีม RTSP พร้อม'}</p>
           <div className="camera-actions">
             {cameraOn ? (
               <button type="button" className="button button-ghost" onClick={onStop}>
-                ปิดกล้อง
+                ปิดสตรีม
               </button>
             ) : (
               <button
@@ -100,12 +100,12 @@ export default function ScanCamera({
                 {starting ? (
                   <>
                     <Loader2 size={16} className="spin" aria-hidden="true" />
-                    กำลังเปิด…
+                    กำลังเชื่อม…
                   </>
                 ) : (
                   <>
                     <Camera size={16} aria-hidden="true" />
-                    {watchMode ? 'เปิดเฝ้าบ้าน' : 'เปิดกล้องสแกน'}
+                    {watchMode ? 'เปิดเฝ้าบ้าน (RTSP)' : 'เปิดกล้องสแกน'}
                   </>
                 )}
               </button>

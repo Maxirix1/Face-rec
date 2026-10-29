@@ -1,9 +1,13 @@
 import { createReadStream } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
+import http from 'node:http';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAssets, PROJECT_DIR } from './prepare-assets.js';
+
+/** MediaMTX WebRTC/WHEP upstream (local Ubuntu). Override with MEDIAMTX_WHEP_ORIGIN. */
+const MEDIAMTX_ORIGIN = process.env.MEDIAMTX_WHEP_ORIGIN || 'http://127.0.0.1:8889';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -37,6 +41,39 @@ function respond(request, response, status, message) {
   response.end(request.method === 'HEAD' ? undefined : message);
 }
 
+function proxyMediaMtx(request, response, pathname) {
+  let upstream;
+  try {
+    upstream = new URL(MEDIAMTX_ORIGIN);
+  } catch {
+    respond(request, response, 500, 'Invalid MEDIAMTX_WHEP_ORIGIN.');
+    return;
+  }
+  const targetPath = pathname === '/webrtc' ? '/' : pathname.replace(/^\/webrtc/, '') || '/';
+  const headers = { ...request.headers, host: upstream.host };
+  delete headers['accept-encoding'];
+  const proxy = http.request(
+    {
+      protocol: upstream.protocol,
+      hostname: upstream.hostname,
+      port: upstream.port || (upstream.protocol === 'https:' ? 443 : 80),
+      path: targetPath + (request.url.includes('?') ? `?${request.url.split('?')[1]}` : ''),
+      method: request.method,
+      headers,
+    },
+    (up) => {
+      response.writeHead(up.statusCode || 502, up.headers);
+      up.pipe(response);
+    },
+  );
+  proxy.on('error', () => {
+    if (!response.headersSent) {
+      respond(request, response, 502, 'MediaMTX offline — start MediaMTX and publish RTSP to cam1.');
+    }
+  });
+  request.pipe(proxy);
+}
+
 /** Create a static server without listening; useful for tests and embedding. */
 export function createStaticServer({ publicDir = path.join(PROJECT_DIR, 'dist') } = {}) {
   const root = path.resolve(publicDir);
@@ -45,11 +82,7 @@ export function createStaticServer({ publicDir = path.join(PROJECT_DIR, 'dist') 
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('Permissions-Policy', 'camera=(self), microphone=()');
-    if (!['GET', 'HEAD'].includes(request.method)) {
-      response.setHeader('Allow', 'GET, HEAD');
-      respond(request, response, 405, 'Method not allowed.');
-      return;
-    }
+
     let pathname;
     try {
       // Inspect the original path before URL normalization can erase dot segments.
@@ -62,6 +95,27 @@ export function createStaticServer({ publicDir = path.join(PROJECT_DIR, 'dist') 
       respond(request, response, 400, 'Invalid request path.');
       return;
     }
+
+    // Proxy MediaMTX WHEP/WebRTC so the browser can play RTSP-backed streams same-origin.
+    if (pathname === '/webrtc' || pathname.startsWith('/webrtc/')) {
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        });
+        response.end();
+        return;
+      }
+      return proxyMediaMtx(request, response, pathname);
+    }
+
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      response.setHeader('Allow', 'GET, HEAD, POST, OPTIONS');
+      respond(request, response, 405, 'Method not allowed.');
+      return;
+    }
+
     const segments = pathname.split('/').filter(Boolean);
     if (segments.some(segment => segment.startsWith('.') || /[\\:]|[. ]$/.test(segment))) {
       respond(request, response, 403, 'This path is not allowed.');
@@ -119,13 +173,15 @@ export async function startServer() {
   } catch {
     throw new Error('dist/ is missing. Run "npm run build" before "npm start", or use "npm run dev" for development.');
   }
-  const host = process.env.HOST || '127.0.0.1';
+  // Default 0.0.0.0 so Pi/LAN can open by IP; set HOST=127.0.0.1 to lock localhost-only.
+  const host = process.env.HOST || '0.0.0.0';
   const server = createStaticServer();
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
   });
-  console.log(`Face Reg is running at http://${host}:${port}`);
+  const displayHost = host === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : host;
+  console.log(`Face Reg is running at http://${displayHost}:${port}`);
   console.log('Open this address in Chrome or Edge. Press Ctrl+C to stop.');
   if (host === '0.0.0.0') {
     console.log('Listening on all interfaces (suitable for Raspberry Pi LAN access).');

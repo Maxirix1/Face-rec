@@ -18,6 +18,7 @@ import {
   pullFamilyProfiles,
   pushFamilyProfiles,
 } from '../lib/guardClient.js';
+import { openWhepStream, resolveWhepUrl } from '../lib/whepClient.js';
 
 const CAMERA_ERRORS = {
   NotAllowedError: 'ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณาเปิดสิทธิ์กล้องของเว็บไซต์ในเบราว์เซอร์ แล้วลองใหม่',
@@ -78,6 +79,9 @@ export function useFaceRegistry() {
   const lastGuardAlertAtRef = useRef(0);
   const guardBusyRef = useRef(false);
   const maybeNotifyGuardRef = useRef(null);
+  /** Cleanup for WebRTC/WHEP (RTSP path via MediaMTX). */
+  const whepCloseRef = useRef(null);
+  const videoSourceKindRef = useRef('rtsp');
 
   guardConfigRef.current = guardConfig;
 
@@ -349,8 +353,9 @@ export function useFaceRegistry() {
           ? `พบ ${faces.length} ใบหน้า${profilesRef.current.length ? ' · กำลังเปรียบเทียบกับข้อมูลที่บันทึก' : ' · เริ่มลงทะเบียนได้เลย'}`
           : 'ไม่พบใบหน้า · ลองมองกล้องและเพิ่มแสงสว่าง',
       );
-      mirrorOverlayRef.current = true;
-      drawRecognition(faces, profilesRef.current, thresholdRef.current, { active: true, mirror: true });
+      const mirror = videoSourceKindRef.current === 'browser';
+      mirrorOverlayRef.current = mirror;
+      drawRecognition(faces, profilesRef.current, thresholdRef.current, { active: true, mirror });
     } catch (error) {
       if (generation !== cameraGenerationRef.current) return;
       stopCameraRef.current();
@@ -370,6 +375,12 @@ export function useFaceRegistry() {
   const stopCamera = useCallback(() => {
     cameraGenerationRef.current += 1;
     clearTimeout(loopTimerRef.current);
+    try {
+      whepCloseRef.current?.();
+    } catch {
+      /* ignore */
+    }
+    whepCloseRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setStarting(false);
@@ -421,12 +432,56 @@ export function useFaceRegistry() {
 
   clearUploadRef.current = clearUpload;
 
+  const attachLiveStream = useCallback(async (requestedStream, generation, { mirror, label }) => {
+    streamRef.current = requestedStream;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    video.srcObject = requestedStream;
+    await video.play();
+    if (generation !== cameraGenerationRef.current) return;
+
+    // WebRTC may report 0x0 briefly — wait for real frames
+    if (!video.videoWidth || !video.videoHeight) {
+      await new Promise((resolve) => {
+        const done = () => {
+          video.removeEventListener('loadedmetadata', done);
+          resolve();
+        };
+        video.addEventListener('loadedmetadata', done);
+        setTimeout(done, 2500);
+      });
+    }
+    if (generation !== cameraGenerationRef.current) return;
+
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    canvas.width = w;
+    canvas.height = h;
+    setAspectRatio(`${w} / ${h}`);
+    mirrorOverlayRef.current = mirror;
+    setCameraOn(true);
+    setCameraState(label);
+    setScanSummary('กำลังค้นหาใบหน้า…');
+    if (storageReady) clearNotice();
+
+    for (const track of requestedStream.getVideoTracks()) {
+      track.addEventListener('ended', () => {
+        if (generation !== cameraGenerationRef.current) return;
+        stopCamera();
+        showNotice('สตรีมกล้องขาด กรุณาตรวจ RTSP/MediaMTX แล้วเปิดใหม่', true);
+      }, { once: true });
+    }
+
+    void detectionLoop(generation);
+  }, [storageReady, clearNotice, detectionLoop, stopCamera, showNotice]);
+
   const startCamera = useCallback(async () => {
     if (starting || streamRef.current) return;
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      showNotice('การใช้กล้องต้องเปิดผ่าน localhost หรือ HTTPS ใน Chrome / Edge — หรือใช้โหมดอัปโหลดรูปแทน', true);
-      return;
-    }
+
+    const cfg = guardConfigRef.current;
+    const useRtsp = cfg.videoSource !== 'browser';
 
     clearUpload();
     setSourceMode('camera');
@@ -436,6 +491,29 @@ export function useFaceRegistry() {
       await ensureModels();
       if (generation !== cameraGenerationRef.current) return;
 
+      if (useRtsp) {
+        videoSourceKindRef.current = 'rtsp';
+        setCameraState('กำลังเชื่อม RTSP / WebRTC…');
+        const whepUrl = resolveWhepUrl(cfg);
+        const session = await openWhepStream(whepUrl);
+        if (generation !== cameraGenerationRef.current) {
+          session.close();
+          return;
+        }
+        whepCloseRef.current = session.close;
+        await attachLiveStream(session.stream, generation, {
+          mirror: false,
+          label: 'กล้อง RTSP (MediaMTX)',
+        });
+        return;
+      }
+
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        showNotice('การใช้กล้องเบราว์เซอร์ต้องเปิดผ่าน localhost หรือ HTTPS — หรือสลับเป็นแหล่ง RTSP ในตั้งค่า', true);
+        return;
+      }
+
+      videoSourceKindRef.current = 'browser';
       const requestedStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 720 } },
         audio: false,
@@ -446,38 +524,18 @@ export function useFaceRegistry() {
         return;
       }
 
-      streamRef.current = requestedStream;
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (!video || !canvas) return;
-
-      video.srcObject = requestedStream;
-      await video.play();
-      if (generation !== cameraGenerationRef.current) return;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      setAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
-      mirrorOverlayRef.current = true;
-      setCameraOn(true);
-      setCameraState('กล้องกำลังทำงาน');
-      setScanSummary('กำลังค้นหาใบหน้า…');
-      if (storageReady) clearNotice();
-
-      for (const track of requestedStream.getVideoTracks()) {
-        track.addEventListener('ended', () => {
-          if (generation !== cameraGenerationRef.current) return;
-          stopCamera();
-          showNotice('กล้องถูกตัดการเชื่อมต่อ กรุณาตรวจสอบกล้อง แล้วเปิดใหม่', true);
-        }, { once: true });
-      }
-
-      void detectionLoop(generation);
+      await attachLiveStream(requestedStream, generation, {
+        mirror: true,
+        label: 'กล้องเบราว์เซอร์',
+      });
     } catch (error) {
       if (generation !== cameraGenerationRef.current) return;
       stopCamera();
       if (modelsReady || faceapiRef.current) {
-        showNotice(CAMERA_ERRORS[error.name] ?? 'เปิดกล้องไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อกล้องและลองใหม่', true);
+        const msg = useRtsp
+          ? 'เปิดสตรีม RTSP ไม่สำเร็จ · ตรวจว่า Ubuntu ดันกล้องเข้า MediaMTX แล้ว และ WHEP URL ถูกต้อง'
+          : (CAMERA_ERRORS[error.name] ?? 'เปิดกล้องไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อกล้องและลองใหม่');
+        showNotice(msg, true);
       }
       console.error(error);
     } finally {
@@ -487,9 +545,7 @@ export function useFaceRegistry() {
     starting,
     clearUpload,
     ensureModels,
-    storageReady,
-    clearNotice,
-    detectionLoop,
+    attachLiveStream,
     stopCamera,
     showNotice,
     modelsReady,

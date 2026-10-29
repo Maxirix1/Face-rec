@@ -183,7 +183,11 @@ label {
   font-weight: 600;
   margin: 0 0 6px;
 }
-input[type="text"] {
+input[type="text"],
+input[type="url"],
+input[type="password"],
+input[type="number"],
+select {
   width: 100%;
   border: 0;
   background: var(--soft);
@@ -192,6 +196,9 @@ input[type="text"] {
   font-size: 16px;
   height: 48px;
   margin-bottom: 4px;
+}
+select {
+  appearance: none;
 }
 .consent {
   display: flex;
