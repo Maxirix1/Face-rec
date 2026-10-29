@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { prepareAssets, PROJECT_DIR } from './prepare-assets.js';
 
 const MIME_TYPES = {
@@ -119,20 +119,28 @@ export async function startServer() {
   } catch {
     throw new Error('dist/ is missing. Run "npm run build" before "npm start", or use "npm run dev" for development.');
   }
+  const host = process.env.HOST || '127.0.0.1';
   const server = createStaticServer();
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', resolve);
+    server.listen(port, host, resolve);
   });
-  console.log(`Face Reg is running at http://127.0.0.1:${port}`);
+  console.log(`Face Reg is running at http://${host}:${port}`);
   console.log('Open this address in Chrome or Edge. Press Ctrl+C to stop.');
+  if (host === '0.0.0.0') {
+    console.log('Listening on all interfaces (suitable for Raspberry Pi LAN access).');
+  }
   const stop = () => server.close(() => { process.exitCode = 0; });
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   return server;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+const isDirectRun =
+  Boolean(process.argv[1]) &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
   startServer().catch(error => {
     console.error(error.code === 'EADDRINUSE'
       ? `Port ${process.env.PORT || '5188'} is already in use. Stop the other server or set PORT to a different number.`

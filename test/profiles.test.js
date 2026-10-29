@@ -54,7 +54,11 @@ test('matching finds known profiles and leaves unrelated or absent profiles unkn
   assert.equal(found.name, 'Bob');
   assert.equal(found.matched, true);
   assert.ok(Math.abs(found.distance - 0.1) < 1e-10);
-  assert.deepEqual(matchDescriptor(descriptor(), []), { id: null, name: 'Unknown', distance: Infinity, matched: false });
+  const empty = matchDescriptor(descriptor(), []);
+  assert.equal(empty.matched, false);
+  assert.equal(empty.id, null);
+  assert.equal(empty.name, 'Unknown');
+  assert.equal(empty.distance, Infinity);
   const unknown = matchDescriptor(descriptor(5), [alice, bob]);
   assert.equal(unknown.matched, false);
   assert.equal(unknown.id, null);

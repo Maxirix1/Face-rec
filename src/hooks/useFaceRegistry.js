@@ -4,12 +4,20 @@ import {
   STORAGE_KEY,
   normalizeName,
   createProfile,
+  samplesFromDescriptors,
   readProfiles,
   writeProfiles,
   removeProfiles,
   matchDescriptor,
   evaluateEnrollmentSample,
 } from '../lib/profiles.js';
+import { loadGuardConfig, saveGuardConfig } from '../lib/guardConfig.js';
+import {
+  captureSnapshotDataUrl,
+  postGuardAlert,
+  pullFamilyProfiles,
+  pushFamilyProfiles,
+} from '../lib/guardClient.js';
 
 const CAMERA_ERRORS = {
   NotAllowedError: 'ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณาเปิดสิทธิ์กล้องของเว็บไซต์ในเบราว์เซอร์ แล้วลองใหม่',
@@ -34,7 +42,7 @@ export function useFaceRegistry() {
   const lastSampleAtRef = useRef(0);
   const lastCapturedDetectionAtRef = useRef(0);
   const profilesRef = useRef([]);
-  const thresholdRef = useRef(0.5);
+  const thresholdRef = useRef(0.42);
   const mirrorOverlayRef = useRef(true);
   const uploadUrlRef = useRef(null);
   const stopCameraRef = useRef(() => {});
@@ -51,16 +59,27 @@ export function useFaceRegistry() {
   const [cameraState, setCameraState] = useState('กล้องปิดอยู่');
   const [sourceMode, setSourceMode] = useState('camera');
   const [uploadName, setUploadName] = useState('');
-  const [scanSummary, setScanSummary] = useState('เลือกโหมดกล้องหรืออัปโหลดรูปเพื่อเริ่มทดสอบ');
+  const [scanSummary, setScanSummary] = useState('เปิดกล้องเพื่อตรวจหาคนในระบบ');
   const [metricFaces, setMetricFaces] = useState('—');
   const [metricLatency, setMetricLatency] = useState('—');
   const [personName, setPersonName] = useState('');
   const [consent, setConsent] = useState(false);
-  const [captureHelp, setCaptureHelp] = useState('เปิดกล้องหรืออัปโหลดรูป แล้วเก็บตัวอย่างทีละครั้ง โดยให้มีคนเดียวในภาพ');
-  const [threshold, setThreshold] = useState(0.5);
+  const [captureHelp, setCaptureHelp] = useState('ใส่ชื่อ แล้วอัปโหลดรูปใบหน้าของคนนั้น');
+  const [threshold, setThreshold] = useState(0.42);
   const [results, setResults] = useState([]);
   const [notice, setNotice] = useState(null);
-  const [aspectRatio, setAspectRatio] = useState('4 / 3');
+  const [aspectRatio, setAspectRatio] = useState('3 / 4');
+  const [enrolling, setEnrolling] = useState(false);
+  const [guardConfig, setGuardConfig] = useState(() => loadGuardConfig());
+  const [lastGuardAlertAt, setLastGuardAlertAt] = useState(0);
+  const [guardAlertStatus, setGuardAlertStatus] = useState('idle');
+  const [strangerLabel, setStrangerLabel] = useState(null);
+  const guardConfigRef = useRef(guardConfig);
+  const lastGuardAlertAtRef = useRef(0);
+  const guardBusyRef = useRef(false);
+  const maybeNotifyGuardRef = useRef(null);
+
+  guardConfigRef.current = guardConfig;
 
   const showNotice = useCallback((message, error = false, retry = null) => {
     setNotice({ message, error, retry });
@@ -75,9 +94,12 @@ export function useFaceRegistry() {
     context.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!faces.length) {
+      setStrangerLabel(null);
       setResults([{
         muted: true,
-        label: active ? 'ยังไม่พบใบหน้าในภาพ' : 'ผลลัพธ์จะแสดงเมื่อเปิดกล้องหรืออัปโหลดรูป',
+        label: active
+          ? (activeProfiles.length ? 'ยังไม่พบใบหน้า · มองกล้องให้ชัด' : 'ยังไม่มีคนในระบบ · ไปแท็บเพิ่มคนก่อน')
+          : 'เปิดกล้องเพื่อตรวจหาคนในระบบ',
       }]);
       return;
     }
@@ -85,7 +107,7 @@ export function useFaceRegistry() {
     const nextResults = [];
     for (const face of faces) {
       const match = matchDescriptor(face.descriptor, activeProfiles, activeThreshold);
-      const label = match.matched ? match.name : 'ไม่รู้จัก';
+      const label = match.matched ? match.name : 'คนแปลกหน้า';
       nextResults.push({
         label,
         matched: match.matched,
@@ -94,23 +116,102 @@ export function useFaceRegistry() {
 
       const box = face.detection.box;
       const x = mirror ? canvas.width - box.x - box.width : box.x;
-      const color = match.matched ? '#ffffff' : '#b8b8b8';
-      const fontSize = Math.max(16, Math.round(canvas.width / 42));
+      const color = match.matched ? '#22c55e' : '#ef4444';
+      const fontSize = Math.max(18, Math.round(canvas.width / 36));
       context.strokeStyle = color;
-      context.lineWidth = Math.max(2, canvas.width / 320);
+      context.lineWidth = Math.max(3, canvas.width / 280);
       context.strokeRect(x, box.y, box.width, box.height);
       context.font = `700 ${fontSize}px "LINE Seed Sans TH", "LINE Seed Sans", sans-serif`;
-      const text = Array.from(label).slice(0, 28).join('');
-      const width = Math.min(canvas.width, context.measureText(text).width + 20);
+      const text = match.matched
+        ? `✓ ${Array.from(label).slice(0, 22).join('')}`
+        : `! ${Array.from(label).slice(0, 20).join('')}`;
+      const width = Math.min(canvas.width, context.measureText(text).width + 24);
       const labelX = Math.max(0, Math.min(x, canvas.width - width));
-      const labelY = Math.max(0, box.y - fontSize - 16);
+      const labelY = Math.max(0, box.y - fontSize - 18);
       context.fillStyle = color;
-      context.fillRect(labelX, labelY, width, fontSize + 12);
-      context.fillStyle = '#111111';
-      context.fillText(text, labelX + 10, labelY + fontSize + 2, width - 20);
+      context.fillRect(labelX, labelY, width, fontSize + 14);
+      context.fillStyle = match.matched ? '#052e16' : '#450a0a';
+      context.fillText(text, labelX + 12, labelY + fontSize + 2, width - 24);
     }
     setResults(nextResults);
+    const stranger = nextResults.find((item) => !item.matched && !item.muted);
+    setStrangerLabel(stranger ? stranger.label : null);
+    if (active) maybeNotifyGuardRef.current?.(nextResults);
   }, []);
+
+  const maybeNotifyGuard = useCallback((nextResults) => {
+    const cfg = guardConfigRef.current;
+    if (!cfg.watchMode || !cfg.guardUrl || !cfg.piToken) return;
+    if (!streamRef.current) return; // only live camera (Pi door mode)
+    if (!profilesRef.current.length) return;
+    const stranger = (nextResults || []).find((item) => item && !item.muted && !item.matched);
+    if (!stranger) return;
+    if (guardBusyRef.current) return;
+
+    const now = Date.now();
+    const cooldownMs = (cfg.alertCooldownSec || 45) * 1000;
+    if (now - lastGuardAlertAtRef.current < cooldownMs) return;
+
+    guardBusyRef.current = true;
+    lastGuardAlertAtRef.current = now;
+    setLastGuardAlertAt(now);
+    setGuardAlertStatus('sending');
+
+    const snapshotBase64 = captureSnapshotDataUrl(canvasRef.current, videoRef.current);
+    void postGuardAlert({
+      guardUrl: cfg.guardUrl,
+      piToken: cfg.piToken,
+      type: 'unknown',
+      label: stranger.label || 'คนแปลกหน้า',
+      message: 'ตรวจพบบุคคลที่ไม่ใช่คนในครอบครัวที่กล้องหน้าบ้าน',
+      streamPath: cfg.streamPath,
+      snapshotBase64,
+    })
+      .then(() => {
+        setGuardAlertStatus('sent');
+        showNotice('แจ้งเตือนไปยัง VPS แล้ว · ครอบครัวสามารถเปิดดูกล้องได้');
+      })
+      .catch((error) => {
+        setGuardAlertStatus('error');
+        console.error(error);
+        showNotice('ส่งแจ้งเตือนไป VPS ไม่สำเร็จ ตรวจ URL/Token หรือเน็ตของ Pi', true);
+      })
+      .finally(() => {
+        guardBusyRef.current = false;
+      });
+  }, [showNotice]);
+
+  maybeNotifyGuardRef.current = maybeNotifyGuard;
+
+  const updateGuardConfig = useCallback((patch) => {
+    setGuardConfig((prev) => saveGuardConfig({ ...prev, ...patch }));
+  }, []);
+
+  const testGuardAlert = useCallback(async () => {
+    const cfg = guardConfigRef.current;
+    if (!cfg.guardUrl || !cfg.piToken) {
+      showNotice('ใส่ Guard URL และ Pi Token ก่อนทดสอบ', true);
+      return;
+    }
+    setGuardAlertStatus('sending');
+    try {
+      await postGuardAlert({
+        guardUrl: cfg.guardUrl,
+        piToken: cfg.piToken,
+        type: 'unknown',
+        label: 'ทดสอบ',
+        message: 'ทดสอบแจ้งเตือนจากแอป Face',
+        streamPath: cfg.streamPath,
+      });
+      setGuardAlertStatus('sent');
+      setLastGuardAlertAt(Date.now());
+      showNotice('ทดสอบแจ้งเตือนสำเร็จ · เปิด guard.effecttier.com ได้เลย');
+    } catch (error) {
+      setGuardAlertStatus('error');
+      console.error(error);
+      showNotice('ทดสอบไม่สำเร็จ ตรวจ URL/Token', true);
+    }
+  }, [showNotice]);
 
   const renderRecognition = useCallback(() => {
     const active = !!streamRef.current || !!uploadUrlRef.current;
@@ -121,6 +222,47 @@ export function useFaceRegistry() {
       { active, mirror: mirrorOverlayRef.current },
     );
   }, [drawRecognition]);
+
+  const syncFamilyToVps = useCallback(async () => {
+    const cfg = guardConfigRef.current;
+    if (!cfg.guardUrl || !cfg.piToken) {
+      showNotice('ใส่ Guard URL และ Pi Token ก่อนซิงก์', true);
+      return;
+    }
+    try {
+      await pushFamilyProfiles({
+        guardUrl: cfg.guardUrl,
+        piToken: cfg.piToken,
+        profiles: profilesRef.current,
+      });
+      showNotice(`ซิงก์ครอบครัวขึ้น VPS แล้ว (${profilesRef.current.length} คน)`);
+    } catch (error) {
+      console.error(error);
+      showNotice('ซิงก์ขึ้น VPS ไม่สำเร็จ', true);
+    }
+  }, [showNotice]);
+
+  const syncFamilyFromVps = useCallback(async () => {
+    const cfg = guardConfigRef.current;
+    if (!cfg.guardUrl || !cfg.piToken) {
+      showNotice('ใส่ Guard URL และ Pi Token ก่อนดึงรายชื่อ', true);
+      return;
+    }
+    try {
+      const remote = await pullFamilyProfiles({
+        guardUrl: cfg.guardUrl,
+        piToken: cfg.piToken,
+      });
+      writeProfiles(remote);
+      profilesRef.current = remote;
+      setProfiles(remote);
+      renderRecognition();
+      showNotice(`ดึงครอบครัวจาก VPS แล้ว (${remote.length} คน)`);
+    } catch (error) {
+      console.error(error);
+      showNotice('ดึงรายชื่อจาก VPS ไม่สำเร็จ', true);
+    }
+  }, [showNotice, renderRecognition]);
 
   const loadProfiles = useCallback(() => {
     try {
@@ -438,21 +580,128 @@ export function useFaceRegistry() {
     if (mode === 'camera') {
       clearUpload();
       setSourceMode('camera');
-      setScanSummary(cameraOn ? 'กำลังค้นหาใบหน้า…' : 'เปิดกล้องเพื่อเริ่มทดสอบแบบสด');
+      setScanSummary(cameraOn ? 'กำลังค้นหาใบหน้า…' : 'เปิดกล้องเพื่อตรวจหาคนในระบบ');
     } else {
       stopCamera();
       setSourceMode('upload');
-      setScanSummary(uploadName ? `พร้อมสแกน · ${uploadName}` : 'อัปโหลดรูปใบหน้าเพื่อทดสอบการจดจำ');
+      setScanSummary('อัปโหลดรูปเพื่อเพิ่มคนในระบบ');
     }
-  }, [sourceMode, clearUpload, cameraOn, stopCamera, uploadName]);
+  }, [sourceMode, clearUpload, cameraOn, stopCamera]);
 
   const resetSamples = useCallback(() => {
     samplesRef.current = [];
     setSamples([]);
     lastSampleAtRef.current = 0;
     lastCapturedDetectionAtRef.current = 0;
-    setCaptureHelp('เปิดกล้องหรืออัปโหลดรูป แล้วเก็บตัวอย่างทีละครั้ง โดยให้มีคนเดียวในภาพ');
+    setCaptureHelp('ใส่ชื่อ แล้วอัปโหลดรูปใบหน้าของคนนั้น');
   }, []);
+
+  /** Mobile-first: one photo → save person into the system. */
+  const enrollFromPhoto = useCallback(async (file) => {
+    if (enrolling) return;
+    let name;
+    try {
+      name = normalizeName(personName);
+    } catch {
+      showNotice('กรุณาใส่ชื่อก่อนอัปโหลดรูป', true);
+      return;
+    }
+    if (!consent) {
+      showNotice('กรุณายินยอมบันทึกลักษณะใบหน้าก่อน', true);
+      return;
+    }
+    if (!file || !file.type.startsWith('image/')) {
+      showNotice('กรุณาเลือกรูปภาพ', true);
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      showNotice('ไฟล์ใหญ่เกิน 12MB', true);
+      return;
+    }
+    if (!storageReady) {
+      showNotice('บันทึกในเบราว์เซอร์ไม่ได้ กรุณาอนุญาตพื้นที่จัดเก็บ', true);
+      return;
+    }
+
+    setEnrolling(true);
+    stopCamera();
+    setSourceMode('upload');
+    try {
+      await ensureModels();
+      const faceapi = faceapiRef.current;
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const image = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('image_load_failed'));
+          img.src = objectUrl;
+        });
+
+        const faces = await faceapi
+          .detectAllFaces(image, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+
+        if (!faces.length) {
+          showNotice('ไม่พบใบหน้าในรูป ลองใช้รูปที่ใบหน้าชัดและหันเข้าหากล้อง', true);
+          return;
+        }
+        if (faces.length > 1) {
+          showNotice('พบหลายใบหน้า กรุณาใช้รูปที่มีคนเดียว', true);
+          return;
+        }
+
+        const face = faces[0];
+        const { box, score } = face.detection;
+        if (score < 0.5 || box.width < 70 || box.height < 70) {
+          showNotice('ใบหน้ายังไม่ชัดพอ ลองใช้รูปที่ใกล้และสว่างกว่านี้', true);
+          return;
+        }
+
+        const evaluation = evaluateEnrollmentSample(face.descriptor, [], profilesRef.current);
+        if (!evaluation.ok) {
+          showNotice(
+            evaluation.reason === 'already_enrolled'
+              ? 'ใบหน้านี้มีในระบบแล้ว'
+              : 'ข้อมูลใบหน้าไม่สมบูรณ์ ลองรูปอื่น',
+            true,
+          );
+          return;
+        }
+
+        const existing = readProfiles();
+        const person = createProfile(name, samplesFromDescriptors(face.descriptor), existing);
+        writeProfiles([...existing, person]);
+        profilesRef.current = [...existing, person];
+        setProfiles(profilesRef.current);
+        setPersonName('');
+        setConsent(false);
+        resetSamples();
+        showNotice(`เพิ่ม “${person.name}” สำเร็จ · ไปแท็บสแกนเพื่อตรวจด้วยกล้อง`);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (error) {
+      const duplicate = String(error?.message || '').includes('already exists');
+      showNotice(
+        duplicate ? 'ชื่อนี้มีอยู่แล้ว ใช้ชื่ออื่น' : 'เพิ่มคนไม่สำเร็จ ลองใหม่',
+        true,
+      );
+      console.error(error);
+    } finally {
+      setEnrolling(false);
+    }
+  }, [
+    enrolling,
+    personName,
+    consent,
+    storageReady,
+    stopCamera,
+    ensureModels,
+    resetSamples,
+    showNotice,
+  ]);
 
   const captureSample = useCallback(() => {
     try {
@@ -650,6 +899,8 @@ export function useFaceRegistry() {
     };
   }, [loadProfiles, resetSamples, renderRecognition, stopCamera]);
 
+  const matchedName = results.find((item) => item.matched)?.label || null;
+
   return {
     videoRef,
     canvasRef,
@@ -661,6 +912,7 @@ export function useFaceRegistry() {
     engineStatus,
     starting,
     scanning,
+    enrolling,
     cameraOn,
     cameraState,
     sourceMode,
@@ -676,12 +928,22 @@ export function useFaceRegistry() {
     threshold,
     updateThreshold,
     results,
+    matchedName,
+    strangerLabel,
+    guardConfig,
+    updateGuardConfig,
+    testGuardAlert,
+    syncFamilyToVps,
+    syncFamilyFromVps,
+    guardAlertStatus,
+    lastGuardAlertAt,
     notice,
     clearNotice,
     aspectRatio,
     startCamera,
     stopCamera,
     scanImageFile,
+    enrollFromPhoto,
     clearUpload,
     changeSourceMode,
     captureSample,

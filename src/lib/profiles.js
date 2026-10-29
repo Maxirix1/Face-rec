@@ -72,6 +72,17 @@ export function createProfile(name, samples, existingProfiles = []) {
   return { id, name: normalized, descriptors, createdAt: new Date().toISOString() };
 }
 
+/** Build the fixed sample count from one or more face descriptors (pads by repeating). */
+export function samplesFromDescriptors(descriptors) {
+  const list = (Array.isArray(descriptors) ? descriptors : [descriptors]).map(validateDescriptor);
+  if (!list.length) throw new TypeError('At least one face descriptor is required.');
+  const samples = [];
+  for (let i = 0; i < SAMPLES_PER_PERSON; i += 1) {
+    samples.push(list[i % list.length]);
+  }
+  return samples;
+}
+
 function requireStorage(storage, method) {
   if (!storage || typeof storage[method] !== 'function') {
     throw new Error('Local storage is unavailable. Enable browser storage to save face profiles.');
@@ -133,7 +144,12 @@ function meanDistance(descriptor, samples) {
   return mean;
 }
 
-export function matchDescriptor(descriptor, profiles, threshold = 0.5) {
+/**
+ * Face-api descriptors: lower distance = closer match.
+ * Default 0.42 is stricter than 0.5 to reduce “คน A ถูกอ่านเป็นคน B”.
+ * Also requires a clear gap vs the 2nd-best profile.
+ */
+export function matchDescriptor(descriptor, profiles, threshold = 0.42, { minMargin = 0.06 } = {}) {
   const candidate = validateDescriptor(descriptor);
   const valid = validateProfiles(profiles);
   if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0) {
@@ -141,15 +157,26 @@ export function matchDescriptor(descriptor, profiles, threshold = 0.5) {
   }
   let nearest = null;
   let distance = Infinity;
+  let second = Infinity;
   for (const profile of valid) {
     const nextDistance = meanDistance(candidate, profile.descriptors);
     if (nextDistance < distance) {
+      second = distance;
       nearest = profile;
       distance = nextDistance;
+    } else if (nextDistance < second) {
+      second = nextDistance;
     }
   }
-  const matched = nearest !== null && distance <= threshold;
-  return { id: matched ? nearest.id : null, name: matched ? nearest.name : 'Unknown', distance, matched };
+  const clearWinner = !Number.isFinite(second) || second - distance >= minMargin || valid.length < 2;
+  const matched = nearest !== null && distance <= threshold && clearWinner;
+  return {
+    id: matched ? nearest.id : null,
+    name: matched ? nearest.name : 'Unknown',
+    distance,
+    secondDistance: Number.isFinite(second) ? second : null,
+    matched,
+  };
 }
 
 /** Reasons are stable UI codes; the calling UI owns localized explanations. */
